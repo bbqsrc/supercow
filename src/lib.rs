@@ -6,6 +6,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(rust_2018_idioms)]
 #![deny(missing_docs)]
 
 //! `Supercow` is `Cow` on steroids.
@@ -1030,7 +1031,6 @@ pub struct Supercow<
     STORAGE = BoxedStorage,
     PTR = *const BORROWED,
 > where
-    BORROWED: 'a,
     *const BORROWED: PointerFirstRef,
     STORAGE: OwnedStorage<OWNED, SHARED>,
     PTR: PtrWrite<BORROWED>,
@@ -1733,7 +1733,7 @@ defimpl! {[] (RefParent for) where {
 /// This is similar to the `Ref` used with `RefCell`.
 pub struct Ref<'a, P>
 where
-    P: RefParent + 'a,
+    P: RefParent,
 {
     // This is a pointer and not a reference as otherwise we would have two
     // `&mut` references into the parent, which is illegal.
@@ -1905,7 +1905,7 @@ macro_rules! deleg_fmt {
             BORROWED : fmt::$tr,
             PTR : PtrRead<BORROWED>,
         } {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 (**self).fmt(f)
             }
         } }
@@ -1928,7 +1928,7 @@ where
     *const BORROWED: PointerFirstRef,
     STORAGE: OwnedStorage<OWNED, SHARED>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<Phantomcow>")
     }
 }
@@ -1940,7 +1940,7 @@ where
     *const BORROWED: PointerFirstRef,
     STORAGE: OwnedStorage<OWNED, SHARED>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (**self).fmt(f)
     }
 }
@@ -2110,12 +2110,12 @@ mod misc_tests {
 
     // This is where the asm in the Performance Notes section comes from.
     #[inline(never)]
-    fn add_two_cow(a: &Cow<u32>, b: &Cow<u32>) -> u32 {
+    fn add_two_cow(a: &Cow<'_, u32>, b: &Cow<'_, u32>) -> u32 {
         **a + **b
     }
 
     #[inline(never)]
-    fn add_two_supercow(a: &InlineSupercow<u32>, b: &InlineSupercow<u32>) -> u32 {
+    fn add_two_supercow(a: &InlineSupercow<'_, u32>, b: &InlineSupercow<'_, u32>) -> u32 {
         **a + **b
     }
 
@@ -2143,7 +2143,7 @@ macro_rules! tests {
             #[test]
             fn ref_to_owned() {
                 let x = 42u32;
-                let a: $stype<u32> = Supercow::borrowed(&x);
+                let a: $stype<'_, u32> = Supercow::borrowed(&x);
                 assert_eq!(x, *a);
                 assert_eq!(&x as *const u32 as usize, (&*a) as *const u32 as usize);
 
@@ -2160,8 +2160,8 @@ macro_rules! tests {
 
             #[test]
             fn supports_dst() {
-                let a: $stype<String, str> = Supercow::borrowed("hello");
-                let b: $stype<String, str> = Supercow::owned("hello".to_owned());
+                let a: $stype<'_, String, str> = Supercow::borrowed("hello");
+                let b: $stype<'_, String, str> = Supercow::owned("hello".to_owned());
                 assert_eq!(a, b);
 
                 let mut c = a.clone();
@@ -2172,13 +2172,13 @@ macro_rules! tests {
 
             #[test]
             fn default_accepts_arc() {
-                let x: $stype<u32> = Supercow::shared(Arc::new(42u32));
+                let x: $stype<'_, u32> = Supercow::shared(Arc::new(42u32));
                 assert_eq!(42, *x);
             }
 
             #[test]
             fn ref_safe_even_if_forgotten() {
-                let mut x: $stype<String, str> = Supercow::owned("foo".to_owned());
+                let mut x: $stype<'_, String, str> = Supercow::owned("foo".to_owned());
                 {
                     let mut m = x.to_mut();
                     // Add a bunch of characters to invalidate the allocation
@@ -2213,7 +2213,7 @@ macro_rules! tests {
                     };
                 }
 
-                let x: $stype<u32> = Supercow::owned(42u32);
+                let x: $stype<'_, u32> = Supercow::owned(42u32);
                 test_fmt!("{}", x);
                 test_fmt!("{:?}", x);
                 test_fmt!("{:o}", x);
@@ -2343,43 +2343,43 @@ macro_rules! tests {
 
             #[test]
             fn unborrow_owned() {
-                let orig: Supercow<String, str> = Supercow::owned("hello world".to_owned());
+                let orig: Supercow<'_, String, str> = Supercow::owned("hello world".to_owned());
                 let unborrowed = Supercow::unborrow(orig);
                 assert_eq!(unborrowed, "hello world");
             }
 
             #[test]
             fn unborrow_borrowed() {
-                let orig: Supercow<String, str> = Supercow::borrowed("hello world");
+                let orig: Supercow<'_, String, str> = Supercow::borrowed("hello world");
                 let unborrowed = Supercow::unborrow(orig);
                 assert_eq!(unborrowed, "hello world");
             }
 
             #[test]
             fn unborrow_shared() {
-                let orig: Supercow<String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let orig: Supercow<'_, String> = Supercow::shared(Arc::new("hello world".to_owned()));
                 let unborrowed = Supercow::unborrow(orig);
                 assert_eq!(unborrowed, "hello world".to_owned());
             }
 
             #[test]
             fn take_ownership_owned() {
-                let orig: Supercow<String, str> = Supercow::owned("hello world".to_owned());
-                let owned: Supercow<String, str> = Supercow::take_ownership(orig);
+                let orig: Supercow<'_, String, str> = Supercow::owned("hello world".to_owned());
+                let owned: Supercow<'_, String, str> = Supercow::take_ownership(orig);
                 assert_eq!(owned, "hello world");
             }
 
             #[test]
             fn take_ownership_borrowed() {
-                let orig: Supercow<String, str> = Supercow::borrowed("hello world");
-                let owned: Supercow<String, str> = Supercow::take_ownership(orig);
+                let orig: Supercow<'_, String, str> = Supercow::borrowed("hello world");
+                let owned: Supercow<'_, String, str> = Supercow::take_ownership(orig);
                 assert_eq!(owned, "hello world");
             }
 
             #[test]
             fn take_ownership_shared() {
-                let orig: Supercow<String> = Supercow::shared(Arc::new("hello world".to_owned()));
-                let owned: Supercow<String> = Supercow::take_ownership(orig);
+                let orig: Supercow<'_, String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let owned: Supercow<'_, String> = Supercow::take_ownership(orig);
                 assert_eq!(owned, "hello world".to_owned());
             }
 
@@ -2399,7 +2399,7 @@ macro_rules! tests {
                 _handle: $ptype<'a, MockNativeResource>,
             }
 
-            fn check_dependent_ok(mdr: MockDependentResource) {
+            fn check_dependent_ok(mdr: MockDependentResource<'_>) {
                 assert_eq!(42, unsafe { *mdr.ptr });
             }
 
@@ -2408,7 +2408,7 @@ macro_rules! tests {
                 let mut forty_two = 42u32;
 
                 let native = MockNativeResource(&mut forty_two);
-                let sc: $stype<MockNativeResource> = Supercow::borrowed(&native);
+                let sc: $stype<'_, MockNativeResource> = Supercow::borrowed(&native);
                 check_dependent_ok(MockDependentResource {
                     ptr: &mut forty_two,
                     _handle: Supercow::phantom(sc),
@@ -2420,7 +2420,7 @@ macro_rules! tests {
                 let mut forty_two = 42u32;
 
                 let native = MockNativeResource(&mut forty_two);
-                let sc: $stype<MockNativeResource> = Supercow::owned(native);
+                let sc: $stype<'_, MockNativeResource> = Supercow::owned(native);
                 check_dependent_ok(MockDependentResource {
                     ptr: &mut forty_two,
                     _handle: Supercow::phantom(sc),
@@ -2432,7 +2432,7 @@ macro_rules! tests {
                 let mut forty_two = 42u32;
 
                 let native = MockNativeResource(&mut forty_two);
-                let sc: $stype<MockNativeResource> = Supercow::shared(Arc::new(native));
+                let sc: $stype<'_, MockNativeResource> = Supercow::shared(Arc::new(native));
                 check_dependent_ok(MockDependentResource {
                     ptr: &mut forty_two,
                     _handle: Supercow::phantom(sc),
@@ -2441,7 +2441,7 @@ macro_rules! tests {
 
             #[test]
             fn clone_owned_phantomcow() {
-                let sc: $stype<String> = Supercow::owned("hello world".to_owned());
+                let sc: $stype<'_, String> = Supercow::owned("hello world".to_owned());
                 let p1 = Supercow::phantom(sc);
                 assert!(Supercow::clone_non_owned(&p1).is_none());
                 let _p2 = p1.clone();
@@ -2449,7 +2449,7 @@ macro_rules! tests {
 
             #[test]
             fn clone_borrowed_phantomcow() {
-                let sc: $stype<String, str> = Supercow::borrowed("hello world");
+                let sc: $stype<'_, String, str> = Supercow::borrowed("hello world");
                 let p1 = Supercow::phantom(sc);
                 assert!(Supercow::clone_non_owned(&p1).is_some());
                 let _p2 = p1.clone();
@@ -2457,7 +2457,7 @@ macro_rules! tests {
 
             #[test]
             fn clone_shared_phantomcow() {
-                let sc: $stype<String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let sc: $stype<'_, String> = Supercow::shared(Arc::new("hello world".to_owned()));
                 let p1 = Supercow::phantom(sc);
                 assert!(Supercow::clone_non_owned(&p1).is_some());
                 let _p2 = p1.clone();
@@ -2472,7 +2472,7 @@ macro_rules! tests {
 
             #[test]
             fn share_owned_supercow() {
-                let mut a: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
+                let mut a: $stype<'_, NotCloneable> = Supercow::owned(NotCloneable(42));
                 let b = Supercow::share(&mut a);
 
                 assert_eq!(42, (*a).0);
@@ -2482,7 +2482,7 @@ macro_rules! tests {
             #[test]
             fn share_borrowed_supercow() {
                 let nc = NotCloneable(42);
-                let mut a: $stype<NotCloneable> = Supercow::borrowed(&nc);
+                let mut a: $stype<'_, NotCloneable> = Supercow::borrowed(&nc);
                 let b = Supercow::share(&mut a);
 
                 assert_eq!(42, (*a).0);
@@ -2491,7 +2491,7 @@ macro_rules! tests {
 
             #[test]
             fn share_shared_supercow() {
-                let mut a: $stype<NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
+                let mut a: $stype<'_, NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
                 let b = Supercow::share(&mut a);
 
                 assert_eq!(42, (*a).0);
@@ -2500,7 +2500,7 @@ macro_rules! tests {
 
             #[test]
             fn share_owned_dst_supercow() {
-                let mut a: $stype<String, str> = Supercow::owned("hello world".into());
+                let mut a: $stype<'_, String, str> = Supercow::owned("hello world".into());
                 let b = Supercow::share(&mut a);
 
                 assert_eq!("hello world", &*a);
@@ -2509,30 +2509,30 @@ macro_rules! tests {
 
             #[test]
             fn share_owned_phantomcow() {
-                let sc: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
-                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let sc: $stype<'_, NotCloneable> = Supercow::owned(NotCloneable(42));
+                let mut a: $ptype<'_, NotCloneable> = Supercow::phantom(sc);
                 let _b = Supercow::share(&mut a);
             }
 
             #[test]
             fn share_borrowed_phantomcow() {
                 let nc = NotCloneable(42);
-                let sc: $stype<NotCloneable> = Supercow::borrowed(&nc);
-                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let sc: $stype<'_, NotCloneable> = Supercow::borrowed(&nc);
+                let mut a: $ptype<'_, NotCloneable> = Supercow::phantom(sc);
                 let _b = Supercow::share(&mut a);
             }
 
             #[test]
             fn share_shared_phantomcow() {
-                let sc: $stype<NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
-                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let sc: $stype<'_, NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
+                let mut a: $ptype<'_, NotCloneable> = Supercow::phantom(sc);
                 let _b = Supercow::share(&mut a);
             }
 
             #[test]
             fn share_owned_dst_phantomcow() {
-                let sc: $stype<String, str> = Supercow::owned("hello world".into());
-                let mut a: $ptype<String, str> = Supercow::phantom(sc);
+                let sc: $stype<'_, String, str> = Supercow::owned("hello world".into());
+                let mut a: $ptype<'_, String, str> = Supercow::phantom(sc);
                 let _b = Supercow::share(&mut a);
             }
         }
