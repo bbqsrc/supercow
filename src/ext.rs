@@ -33,28 +33,31 @@ use std::sync::Arc;
 /// (including if that value is moved or cloned).
 pub unsafe trait ConstDeref {
     /// The type this value dereferences to.
-    type Target : ?Sized;
+    type Target: ?Sized;
     /// Returns the (constant) value that this value dereferences to.
     fn const_deref(&self) -> &Self::Target;
 }
 
-unsafe impl<T : ?Sized> ConstDeref for Rc<T> {
+unsafe impl<T: ?Sized> ConstDeref for Rc<T> {
     type Target = T;
-    fn const_deref(&self) -> &T { self }
+    fn const_deref(&self) -> &T {
+        self
+    }
 }
 
-unsafe impl<T : ?Sized> ConstDeref for Arc<T> {
+unsafe impl<T: ?Sized> ConstDeref for Arc<T> {
     type Target = T;
-    fn const_deref(&self) -> &T { self }
+    fn const_deref(&self) -> &T {
+        self
+    }
 }
 
-unsafe impl<T : ConstDeref + ?Sized> ConstDeref for Box<T> {
+unsafe impl<T: ConstDeref + ?Sized> ConstDeref for Box<T> {
     type Target = T::Target;
     fn const_deref(&self) -> &T::Target {
         (**self).const_deref()
     }
 }
-
 
 /// Trait for `ConstDeref` implementations which can be constructed in a
 /// two-step process.
@@ -66,7 +69,7 @@ unsafe impl<T : ConstDeref + ?Sized> ConstDeref for Box<T> {
 ///
 /// Essentially, such shared references actually hold an `Option<Target>` which
 /// defaults to `None`, and panic if dereferenced before the value is set.
-pub trait TwoStepShared<OWNED, BORROWED : ?Sized> {
+pub trait TwoStepShared<OWNED, BORROWED: ?Sized> {
     /// Returns a new, empty instance of `Self`.
     fn new_two_step() -> Self;
     /// Returns the internal `Option<T>` backing this value.
@@ -82,27 +85,30 @@ pub trait TwoStepShared<OWNED, BORROWED : ?Sized> {
     unsafe fn deref_holder(&mut self) -> &mut Option<OWNED>;
 }
 
-macro_rules! twostepwrapper { ($outer:ident, $inner:ident) => {
-    /// Wrapper providing a `TwoStepShared` implementation.
-    pub struct $outer<T, B : ?Sized>($inner<Option<T>>, PhantomData<B>);
-    impl<T, B : ?Sized> Clone for $outer<T, B> {
-        fn clone(&self) -> Self {
-            $outer(self.0.clone(), PhantomData)
+macro_rules! twostepwrapper {
+    ($outer:ident, $inner:ident) => {
+        /// Wrapper providing a `TwoStepShared` implementation.
+        pub struct $outer<T, B: ?Sized>($inner<Option<T>>, PhantomData<B>);
+        impl<T, B: ?Sized> Clone for $outer<T, B> {
+            fn clone(&self) -> Self {
+                $outer(self.0.clone(), PhantomData)
+            }
         }
-    }
 
-    impl<T, B : ?Sized> TwoStepShared<T, B> for $outer<T, B>
-    where T : SafeBorrow<B> {
-        fn new_two_step() -> Self {
-            $outer($inner::new(None), PhantomData)
+        impl<T, B: ?Sized> TwoStepShared<T, B> for $outer<T, B>
+        where
+            T: SafeBorrow<B>,
+        {
+            fn new_two_step() -> Self {
+                $outer($inner::new(None), PhantomData)
+            }
+            unsafe fn deref_holder(&mut self) -> &mut Option<T> {
+                // Safety: No operation here is actually unsafe.
+                $inner::get_mut(&mut self.0).expect("Two-step wrapper already cloned")
+            }
         }
-        unsafe fn deref_holder(&mut self) -> &mut Option<T> {
-            // Safety: No operation here is actually unsafe.
-            $inner::get_mut(&mut self.0)
-                .expect("Two-step wrapper already cloned")
-        }
-    }
-} }
+    };
+}
 twostepwrapper!(TwoStepRc, Rc);
 twostepwrapper!(TwoStepArc, Arc);
 
@@ -120,7 +126,7 @@ pub const MAX_INTERNAL_BORROW_DISPLACEMENT: usize = 2048;
 /// Behaviour is undefined if the `borrow()` implementation may return a
 /// reference into `self` which is more than `MAX_INTERNAL_BORROW_DISPLACEMENT`
 /// bytes beyond the base of `self`.
-pub unsafe trait SafeBorrow<T : ?Sized>: Borrow<T> {
+pub unsafe trait SafeBorrow<T: ?Sized>: Borrow<T> {
     /// Given `ptr`, which was obtained from a prior call to `Self::borrow()`,
     /// return a value with the same nominal lifetime which is guaranteed to
     /// survive mutations to `Self`.
@@ -135,31 +141,47 @@ pub unsafe trait SafeBorrow<T : ?Sized>: Borrow<T> {
     /// `Self` could invalidate the reference.
     fn borrow_replacement<'a>(ptr: &'a T) -> &'a T;
 }
-unsafe impl<T : ?Sized> SafeBorrow<T> for T {
-    fn borrow_replacement(ptr: &T) -> &T { ptr }
+unsafe impl<T: ?Sized> SafeBorrow<T> for T {
+    fn borrow_replacement(ptr: &T) -> &T {
+        ptr
+    }
 }
-unsafe impl<B, T> SafeBorrow<[B]> for T where T : Borrow<[B]> {
+unsafe impl<B, T> SafeBorrow<[B]> for T
+where
+    T: Borrow<[B]>,
+{
     fn borrow_replacement(_: &[B]) -> &[B] {
         &[]
     }
 }
-unsafe impl<T> SafeBorrow<str> for T where T : Borrow<str> {
-    fn borrow_replacement(_: &str) -> &str { "" }
+unsafe impl<T> SafeBorrow<str> for T
+where
+    T: Borrow<str>,
+{
+    fn borrow_replacement(_: &str) -> &str {
+        ""
+    }
 }
 unsafe impl<T> SafeBorrow<CStr> for T
-where T : Borrow<CStr> {
+where
+    T: Borrow<CStr>,
+{
     fn borrow_replacement(_: &CStr) -> &CStr {
         Default::default()
     }
 }
 unsafe impl<T> SafeBorrow<OsStr> for T
-where T : Borrow<OsStr> {
+where
+    T: Borrow<OsStr>,
+{
     fn borrow_replacement(_: &OsStr) -> &OsStr {
         OsStr::new("")
     }
 }
 unsafe impl<T> SafeBorrow<Path> for T
-where T : Borrow<Path> {
+where
+    T: Borrow<Path>,
+{
     fn borrow_replacement(_: &Path) -> &Path {
         Path::new("")
     }
@@ -183,14 +205,14 @@ where T : Borrow<Path> {
 ///
 /// Behaviour is undefined if the pointer has any `Drop` implementation,
 /// should a future Rust version make such things possible.
-pub unsafe trait PointerFirstRef : Copy { }
+pub unsafe trait PointerFirstRef: Copy {}
 
-unsafe impl<T : Sized> PointerFirstRef for *const T { }
-unsafe impl<T> PointerFirstRef for *const [T] { }
-unsafe impl PointerFirstRef for *const str { }
-unsafe impl PointerFirstRef for *const ::std::ffi::CStr { }
-unsafe impl PointerFirstRef for *const ::std::ffi::OsStr { }
-unsafe impl PointerFirstRef for *const ::std::path::Path { }
+unsafe impl<T: Sized> PointerFirstRef for *const T {}
+unsafe impl<T> PointerFirstRef for *const [T] {}
+unsafe impl PointerFirstRef for *const str {}
+unsafe impl PointerFirstRef for *const ::std::ffi::CStr {}
+unsafe impl PointerFirstRef for *const ::std::ffi::OsStr {}
+unsafe impl PointerFirstRef for *const ::std::path::Path {}
 
 /// Like `std::convert::From`, but without the blanket implementations that
 /// cause problems for `supercow_features!`.
@@ -203,11 +225,15 @@ pub unsafe trait SharedFrom<T> {
     /// Converts the given `T` to `Self`.
     fn shared_from(t: T) -> Self;
 }
-unsafe impl <T> SharedFrom<Rc<T>> for Rc<T> {
-    fn shared_from(t: Rc<T>) -> Rc<T> { t }
+unsafe impl<T> SharedFrom<Rc<T>> for Rc<T> {
+    fn shared_from(t: Rc<T>) -> Rc<T> {
+        t
+    }
 }
-unsafe impl <T> SharedFrom<Arc<T>> for Arc<T> {
-    fn shared_from(t: Arc<T>) -> Arc<T> { t }
+unsafe impl<T> SharedFrom<Arc<T>> for Arc<T> {
+    fn shared_from(t: Arc<T>) -> Arc<T> {
+        t
+    }
 }
 
 /// Describes how an `OWNED` or `SHARED` value is stored in a `Supercow`.
@@ -221,7 +247,7 @@ unsafe impl <T> SharedFrom<Arc<T>> for Arc<T> {
 /// being implemented correctly.
 ///
 /// No function may mutate the `A` or `B` values.
-pub unsafe trait OwnedStorage<A, B> : Default {
+pub unsafe trait OwnedStorage<A, B>: Default {
     /// Allocates the given owned value.
     ///
     /// `self` is a `Default`-initialised instance.
@@ -359,10 +385,10 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    unsafe fn deallocate_a(&mut self, _: *mut ()) { }
+    unsafe fn deallocate_a(&mut self, _: *mut ()) {}
 
     #[inline]
-    unsafe fn deallocate_b(&mut self, _: *mut ()) { }
+    unsafe fn deallocate_b(&mut self, _: *mut ()) {}
 
     #[inline]
     unsafe fn deallocate_into_a(&mut self, _: *mut ()) -> A {
@@ -381,7 +407,9 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    fn is_internal_storage() -> bool { true }
+    fn is_internal_storage() -> bool {
+        true
+    }
 }
 
 /// Used to give arbitrary values at least pointer alignment without making
@@ -389,7 +417,7 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
 ///
 /// This likely isn't strictly necessary, since any allocator has an inherent
 /// alignment anyway, but it doesn't hurt to be explicit.
-type Aligned<T> = ([*const();0], T);
+type Aligned<T> = ([*const (); 0], T);
 
 /// Causes the `OWNED` or `SHARED` value of a `Supercow` to be stored in a
 /// `Box`.
@@ -438,12 +466,12 @@ unsafe impl<A, B> OwnedStorage<A, B> for BoxedStorage {
 
     #[inline]
     unsafe fn get_mut_a<'a>(&'a mut self, ptr: *mut ()) -> &'a mut A {
-        &mut(*(ptr as *mut Aligned<A>)).1
+        &mut (*(ptr as *mut Aligned<A>)).1
     }
 
     #[inline]
     unsafe fn get_mut_b<'a>(&'a mut self, ptr: *mut ()) -> &'a mut B {
-        &mut(*(ptr as *mut Aligned<B>)).1
+        &mut (*(ptr as *mut Aligned<B>)).1
     }
 
     #[inline]
@@ -481,14 +509,16 @@ unsafe impl<A, B> OwnedStorage<A, B> for BoxedStorage {
     }
 
     #[inline]
-    fn is_internal_storage() -> bool { false }
+    fn is_internal_storage() -> bool {
+        false
+    }
 }
 
 /// Optionally stores a pointer to a value.
 ///
 /// It is doubtful that there are any types besides `()` and `*mut T` which
 /// could implement this usefully.
-pub unsafe trait PtrWrite<T : ?Sized> : Copy {
+pub unsafe trait PtrWrite<T: ?Sized>: Copy {
     /// Returns an instance of `Self` with no particular value.
     fn new() -> Self;
 
@@ -501,15 +531,17 @@ pub unsafe trait PtrWrite<T : ?Sized> : Copy {
     fn store_ptr(&mut self, t: *const T);
 }
 
-unsafe impl<T : ?Sized> PtrWrite<T> for () {
+unsafe impl<T: ?Sized> PtrWrite<T> for () {
     #[inline(always)]
-    fn new() -> Self { () }
+    fn new() -> Self {
+        ()
+    }
 
     #[inline(always)]
-    fn store_ptr(&mut self, _: *const T) { }
+    fn store_ptr(&mut self, _: *const T) {}
 }
 
-unsafe impl<T : ?Sized> PtrWrite<T> for *const T {
+unsafe impl<T: ?Sized> PtrWrite<T> for *const T {
     #[inline(always)]
     fn new() -> Self {
         unsafe { mem::uninitialized() }
@@ -522,7 +554,7 @@ unsafe impl<T : ?Sized> PtrWrite<T> for *const T {
 }
 
 /// Read trait corresponding to `PtrWrite`.
-pub unsafe trait PtrRead<T : ?Sized> : PtrWrite<T> {
+pub unsafe trait PtrRead<T: ?Sized>: PtrWrite<T> {
     /// Returns the pointer most recently stored via `store_ptr()`.
     ///
     /// ## Unsafety
@@ -533,7 +565,7 @@ pub unsafe trait PtrRead<T : ?Sized> : PtrWrite<T> {
     fn get_ptr(&self) -> *const T;
 }
 
-unsafe impl<T : ?Sized> PtrRead<T> for *const T {
+unsafe impl<T: ?Sized> PtrRead<T> for *const T {
     #[inline(always)]
     fn get_ptr(&self) -> *const T {
         *self
@@ -549,7 +581,7 @@ unsafe impl<T : ?Sized> PtrRead<T> for *const T {
 #[allow(missing_docs)]
 #[doc(hidden)]
 pub trait RefParent {
-    type Owned : ?Sized;
+    type Owned: ?Sized;
 
     /// Notifies `self` that a `Ref` has been dropped.
     ///

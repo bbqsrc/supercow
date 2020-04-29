@@ -883,7 +883,7 @@ macro_rules! supercow_features {
             $(
             /// Clone this value, and then immediately put it into a `Box`
             /// behind a trait object of this trait.
-            fn $clone_boxed(&self) -> Box<$feature_name<'a> + 'a>;
+            fn $clone_boxed(&self) -> Box<dyn $feature_name<'a> + 'a>;
             )*
 
             /// Returns the address of `self`.
@@ -895,7 +895,7 @@ macro_rules! supercow_features {
         impl<'a, T : 'a + $($req +)* $($clone +)* Sized>
         $feature_name<'a> for T {
             $(
-            fn $clone_boxed(&self) -> Box<$feature_name<'a> + 'a> {
+            fn $clone_boxed(&self) -> Box<dyn $feature_name<'a> + 'a> {
                 let cloned: T = self.clone();
                 Box::new(cloned)
             }
@@ -908,13 +908,13 @@ macro_rules! supercow_features {
         // This implementation is safe -- all we do is move `T`, so if `T` is
         // `ConstDeref`, its returned address will not be affected.
         unsafe impl<'a, T : $feature_name<'a>> $crate::ext::SharedFrom<T>
-        for Box<$feature_name<'a> + 'a> {
+        for Box<dyn $feature_name<'a> + 'a> {
             fn shared_from(t: T) -> Self {
                 Box::new(t)
             }
         }
         $(
-        impl<'a> $clone for Box<$feature_name<'a> + 'a> {
+        impl<'a> $clone for Box<dyn $feature_name<'a> + 'a> {
             fn clone(&self) -> Self {
                 $feature_name::clone_boxed(&**self)
             }
@@ -922,7 +922,7 @@ macro_rules! supercow_features {
         )*
         $(
         impl<'a, S : 'a + ?Sized, T : 'a> $crate::ext::TwoStepShared<T, S>
-        for Box<$feature_name<'a> + 'a>
+        for Box<dyn $feature_name<'a> + 'a>
         where T : $crate::ext::SafeBorrow<S>,
               $twostep_inner<T,S> : $feature_name<'a> {
             fn new_two_step() -> Self {
@@ -981,9 +981,7 @@ supercow_features!(
 /// # }
 /// ```
 pub type NonSyncSupercow<'a, OWNED, BORROWED = OWNED> =
-    Supercow<'a, OWNED, BORROWED,
-             Box<NonSyncFeatures<'static> + 'static>,
-             BoxedStorage>;
+    Supercow<'a, OWNED, BORROWED, Box<dyn NonSyncFeatures<'static> + 'static>, BoxedStorage>;
 
 /// `Supercow` with the default `STORAGE` changed to `InlineStorage`.
 ///
@@ -991,17 +989,23 @@ pub type NonSyncSupercow<'a, OWNED, BORROWED = OWNED> =
 /// shared `Supercow` (down to zero for owned, but note that the default
 /// `SHARED` still has its own `Box`) at the cost of bloating the `Supercow`
 /// itself, as it now needs to be able to fit a whole `OWNED` instance.
-pub type InlineSupercow<'a, OWNED, BORROWED = OWNED,
-                       SHARED = Box<DefaultFeatures<'static> + 'static>> =
-    Supercow<'a, OWNED, BORROWED, SHARED, InlineStorage<OWNED, SHARED>>;
+pub type InlineSupercow<
+    'a,
+    OWNED,
+    BORROWED = OWNED,
+    SHARED = Box<dyn DefaultFeatures<'static> + 'static>,
+> = Supercow<'a, OWNED, BORROWED, SHARED, InlineStorage<OWNED, SHARED>>;
 
 /// `NonSyncSupercow` with the `STORAGE` changed to `InlineStorage`.
 ///
 /// This combines both properties of `NonSyncSupercow` and `InlineSupercow`.
-pub type InlineNonSyncSupercow<'a, OWNED, BORROWED = OWNED> =
-    Supercow<'a, OWNED, BORROWED,
-             Box<NonSyncFeatures<'static> + 'static>,
-             InlineStorage<OWNED, Box<NonSyncFeatures<'static> + 'static>>>;
+pub type InlineNonSyncSupercow<'a, OWNED, BORROWED = OWNED> = Supercow<
+    'a,
+    OWNED,
+    BORROWED,
+    Box<dyn NonSyncFeatures<'static> + 'static>,
+    InlineStorage<OWNED, Box<dyn NonSyncFeatures<'static> + 'static>>,
+>;
 
 /// The actual generic reference type.
 ///
@@ -1018,13 +1022,19 @@ pub type InlineNonSyncSupercow<'a, OWNED, BORROWED = OWNED> =
 ///
 /// - `PTR : PtrRead<BORROWED>` means the operation is not available on
 /// `Phantomcow`.
-pub struct Supercow<'a, OWNED, BORROWED : ?Sized = OWNED,
-                    SHARED = Box<DefaultFeatures<'static> + 'static>,
-                    STORAGE = BoxedStorage, PTR = *const BORROWED>
-where BORROWED : 'a,
-      *const BORROWED : PointerFirstRef,
-      STORAGE : OwnedStorage<OWNED, SHARED>,
-      PTR : PtrWrite<BORROWED> {
+pub struct Supercow<
+    'a,
+    OWNED,
+    BORROWED: ?Sized = OWNED,
+    SHARED = Box<dyn DefaultFeatures<'static> + 'static>,
+    STORAGE = BoxedStorage,
+    PTR = *const BORROWED,
+> where
+    BORROWED: 'a,
+    *const BORROWED: PointerFirstRef,
+    STORAGE: OwnedStorage<OWNED, SHARED>,
+    PTR: PtrWrite<BORROWED>,
+{
     // This stores the precalculated `Deref` target, and is the only thing the
     // `Deref` implementation needs to inspect.
     //
@@ -1098,25 +1108,34 @@ where BORROWED : 'a,
 /// The size of a `Phantomcow` is generally equal to the size of the
 /// corresponding `Supercow` type minus the size of `&'a BORROWED`, though this
 /// may not be exact depending on `STORAGE` alignment, etc.
-pub type Phantomcow<'a, OWNED, BORROWED = OWNED,
-                    SHARED = Box<DefaultFeatures<'static> + 'static>,
-                    STORAGE = BoxedStorage> =
-    Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, ()>;
+pub type Phantomcow<
+    'a,
+    OWNED,
+    BORROWED = OWNED,
+    SHARED = Box<dyn DefaultFeatures<'static> + 'static>,
+    STORAGE = BoxedStorage,
+> = Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, ()>;
 
 /// The `Phantomcow` variant corresponding to `NonSyncSupercow`.
 pub type NonSyncPhantomcow<'a, OWNED, BORROWED = OWNED> =
-    Phantomcow<'a, OWNED, BORROWED, Box<NonSyncFeatures<'static> + 'static>,
-               BoxedStorage>;
+    Phantomcow<'a, OWNED, BORROWED, Box<dyn NonSyncFeatures<'static> + 'static>, BoxedStorage>;
 
 /// The `Phantomcow` variant corresponding to `InlineStorage`.
-pub type InlinePhantomcow<'a, OWNED, BORROWED = OWNED,
-                          SHARED = Box<DefaultFeatures<'static> + 'static>> =
-    Phantomcow<'a, OWNED, BORROWED, SHARED, InlineStorage<OWNED, SHARED>>;
+pub type InlinePhantomcow<
+    'a,
+    OWNED,
+    BORROWED = OWNED,
+    SHARED = Box<dyn DefaultFeatures<'static> + 'static>,
+> = Phantomcow<'a, OWNED, BORROWED, SHARED, InlineStorage<OWNED, SHARED>>;
 
 /// The `Phantomcow` variant corresponding to `InlineNonSyncSupercow`.
-pub type InlineNonSyncPhantomcow<'a, OWNED, BORROWED = OWNED> =
-    Phantomcow<'a, OWNED, BORROWED, Box<NonSyncFeatures<'static> + 'static>,
-             InlineStorage<OWNED, Box<NonSyncFeatures<'static> + 'static>>>;
+pub type InlineNonSyncPhantomcow<'a, OWNED, BORROWED = OWNED> = Phantomcow<
+    'a,
+    OWNED,
+    BORROWED,
+    Box<dyn NonSyncFeatures<'static> + 'static>,
+    InlineStorage<OWNED, Box<dyn NonSyncFeatures<'static> + 'static>>,
+>;
 
 enum SupercowMode {
     Owned(*mut ()),
@@ -1713,16 +1732,19 @@ defimpl! {[] (RefParent for) where {
 ///
 /// This is similar to the `Ref` used with `RefCell`.
 pub struct Ref<'a, P>
-where P : RefParent + 'a {
+where
+    P: RefParent + 'a,
+{
     // This is a pointer and not a reference as otherwise we would have two
     // `&mut` references into the parent, which is illegal.
     r: *mut P::Owned,
     parent: &'a mut P,
 }
 
-
 impl<'a, P> Deref for Ref<'a, P>
-where P : RefParent + 'a {
+where
+    P: RefParent + 'a,
+{
     type Target = P::Owned;
 
     #[inline]
@@ -1733,15 +1755,19 @@ where P : RefParent + 'a {
 }
 
 impl<'a, P> DerefMut for Ref<'a, P>
-where P : RefParent + 'a {
+where
+    P: RefParent + 'a,
+{
     #[inline]
     fn deref_mut(&mut self) -> &mut P::Owned {
-        unsafe { &mut*self.r }
+        unsafe { &mut *self.r }
     }
 }
 
 impl<'a, P> Drop for Ref<'a, P>
-where P : RefParent + 'a {
+where
+    P: RefParent + 'a,
+{
     #[inline]
     fn drop(&mut self) {
         // The value of `OWNED::borrow()` may have changed, so recompute
@@ -1850,37 +1876,41 @@ defimpl! {[] (From<&'a OWNED> for) where {
 // Similarly, we can't support arbitrary types here, and need to require
 // `BORROWED == OWNED` for `Rc` and `Arc`. Ideally, we'd support anything that
 // coerces into `SHARED`. Again, maybe one day after specialisation..
-impl<'a, OWNED, SHARED, STORAGE> From<Rc<OWNED>>
-for Supercow<'a, OWNED, OWNED, SHARED, STORAGE>
-where SHARED : SharedFrom<Rc<OWNED>>,
-      STORAGE : OwnedStorage<OWNED, SHARED>,
-      OWNED : 'a,
-      *const OWNED : PointerFirstRef {
+impl<'a, OWNED, SHARED, STORAGE> From<Rc<OWNED>> for Supercow<'a, OWNED, OWNED, SHARED, STORAGE>
+where
+    SHARED: SharedFrom<Rc<OWNED>>,
+    STORAGE: OwnedStorage<OWNED, SHARED>,
+    OWNED: 'a,
+    *const OWNED: PointerFirstRef,
+{
     fn from(rc: Rc<OWNED>) -> Self {
         Self::shared(rc)
     }
 }
-impl<'a, OWNED, SHARED, STORAGE> From<Arc<OWNED>>
-for Supercow<'a, OWNED, OWNED, SHARED, STORAGE>
-where SHARED : SharedFrom<Arc<OWNED>>,
-      STORAGE : OwnedStorage<OWNED, SHARED>,
-      OWNED : 'a,
-      *const OWNED : PointerFirstRef {
+impl<'a, OWNED, SHARED, STORAGE> From<Arc<OWNED>> for Supercow<'a, OWNED, OWNED, SHARED, STORAGE>
+where
+    SHARED: SharedFrom<Arc<OWNED>>,
+    STORAGE: OwnedStorage<OWNED, SHARED>,
+    OWNED: 'a,
+    *const OWNED: PointerFirstRef,
+{
     fn from(rc: Arc<OWNED>) -> Self {
         Self::shared(rc)
     }
 }
 
-macro_rules! deleg_fmt { ($tr:ident) => {
-    defimpl! {[] (fmt::$tr for) where {
-        BORROWED : fmt::$tr,
-        PTR : PtrRead<BORROWED>,
-    } {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            (**self).fmt(f)
-        }
-    } }
-} }
+macro_rules! deleg_fmt {
+    ($tr:ident) => {
+        defimpl! {[] (fmt::$tr for) where {
+            BORROWED : fmt::$tr,
+            PTR : PtrRead<BORROWED>,
+        } {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                (**self).fmt(f)
+            }
+        } }
+    };
+}
 
 deleg_fmt!(Binary);
 deleg_fmt!(Display);
@@ -1891,21 +1921,25 @@ deleg_fmt!(Pointer);
 deleg_fmt!(UpperExp);
 deleg_fmt!(UpperHex);
 
-impl<'a, OWNED, BORROWED : ?Sized, SHARED, STORAGE>
-fmt::Debug for Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, ()>
-where BORROWED : 'a,
-      *const BORROWED : PointerFirstRef,
-      STORAGE : OwnedStorage<OWNED, SHARED> {
+impl<'a, OWNED, BORROWED: ?Sized, SHARED, STORAGE> fmt::Debug
+    for Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, ()>
+where
+    BORROWED: 'a,
+    *const BORROWED: PointerFirstRef,
+    STORAGE: OwnedStorage<OWNED, SHARED>,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<Phantomcow>")
     }
 }
 
-impl<'a, OWNED, BORROWED : ?Sized, SHARED, STORAGE>
-fmt::Debug for Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, *const BORROWED>
-where BORROWED : fmt::Debug + 'a,
-      *const BORROWED : PointerFirstRef,
-      STORAGE : OwnedStorage<OWNED, SHARED> {
+impl<'a, OWNED, BORROWED: ?Sized, SHARED, STORAGE> fmt::Debug
+    for Supercow<'a, OWNED, BORROWED, SHARED, STORAGE, *const BORROWED>
+where
+    BORROWED: fmt::Debug + 'a,
+    *const BORROWED: PointerFirstRef,
+    STORAGE: OwnedStorage<OWNED, SHARED>,
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         (**self).fmt(f)
     }
@@ -1977,20 +2011,20 @@ defimpl! {[] (Hash for) where {
 trait ReferenceExt {
     fn address(&self) -> usize;
 }
-impl<'a, T : ?Sized + 'a> ReferenceExt for &'a T {
+impl<'a, T: ?Sized + 'a> ReferenceExt for &'a T {
     #[inline]
     fn address(&self) -> usize {
         (*self) as *const T as *const () as usize
     }
 }
-impl<'a, T : ?Sized + 'a> ReferenceExt for &'a mut T {
+impl<'a, T: ?Sized + 'a> ReferenceExt for &'a mut T {
     #[inline]
     fn address(&self) -> usize {
         (*self) as *const T as *const () as usize
     }
 }
 
-unsafe trait PfrExt : Copy {
+unsafe trait PfrExt: Copy {
     /// Returns the address of this pointer.
     #[inline]
     fn address(self) -> usize {
@@ -2065,8 +2099,8 @@ unsafe trait PfrExt : Copy {
         self.with_address(self.address() | 1usize)
     }
 }
-unsafe impl<T : PointerFirstRef> PfrExt for T { }
-unsafe impl<T : ?Sized> PfrExt for *mut T { }
+unsafe impl<T: PointerFirstRef> PfrExt for T {}
+unsafe impl<T: ?Sized> PfrExt for *mut T {}
 
 #[cfg(test)]
 mod misc_tests {
@@ -2081,8 +2115,7 @@ mod misc_tests {
     }
 
     #[inline(never)]
-    fn add_two_supercow(a: &InlineSupercow<u32>,
-                        b: &InlineSupercow<u32>) -> u32 {
+    fn add_two_supercow(a: &InlineSupercow<u32>, b: &InlineSupercow<u32>) -> u32 {
         **a + **b
     }
 
@@ -2092,435 +2125,425 @@ mod misc_tests {
         // it.
         assert_eq!(42, add_two_cow(&Cow::Owned(40), &Cow::Owned(2)));
         assert_eq!(44, add_two_cow(&Cow::Borrowed(&38), &Cow::Borrowed(&6)));
-        assert_eq!(42, add_two_supercow(&Supercow::owned(40),
-                                        &Supercow::owned(2)));
+        assert_eq!(
+            42,
+            add_two_supercow(&Supercow::owned(40), &Supercow::owned(2))
+        );
     }
 }
 
-macro_rules! tests { ($modname:ident, $stype:ident, $ptype:ident) => {
-#[cfg(test)]
-mod $modname {
-    use std::sync::Arc;
+macro_rules! tests {
+    ($modname:ident, $stype:ident, $ptype:ident) => {
+        #[cfg(test)]
+        mod $modname {
+            use std::sync::Arc;
 
-    use super::*;
+            use super::*;
 
-    #[test]
-    fn ref_to_owned() {
-        let x = 42u32;
-        let a: $stype<u32> = Supercow::borrowed(&x);
-        assert_eq!(x, *a);
-        assert_eq!(&x as *const u32 as usize,
-                   (&*a) as *const u32 as usize);
+            #[test]
+            fn ref_to_owned() {
+                let x = 42u32;
+                let a: $stype<u32> = Supercow::borrowed(&x);
+                assert_eq!(x, *a);
+                assert_eq!(&x as *const u32 as usize, (&*a) as *const u32 as usize);
 
-        let mut b = a.clone();
-        assert_eq!(x, *b);
-        assert_eq!(&x as *const u32 as usize,
-                   (&*b) as *const u32 as usize);
+                let mut b = a.clone();
+                assert_eq!(x, *b);
+                assert_eq!(&x as *const u32 as usize, (&*b) as *const u32 as usize);
 
-        *b.to_mut() = 56;
-        assert_eq!(42, *a);
-        assert_eq!(x, *a);
-        assert_eq!(&x as *const u32 as usize,
-                   (&*a) as *const u32 as usize);
-        assert_eq!(56, *b);
-    }
-
-    #[test]
-    fn supports_dst() {
-        let a: $stype<String, str> = Supercow::borrowed("hello");
-        let b: $stype<String, str> = Supercow::owned("hello".to_owned());
-        assert_eq!(a, b);
-
-        let mut c = a.clone();
-        c.to_mut().push_str(" world");
-        assert_eq!(a, b);
-        assert_eq!(c, "hello world");
-    }
-
-    #[test]
-    fn default_accepts_arc() {
-        let x: $stype<u32> = Supercow::shared(Arc::new(42u32));
-        assert_eq!(42, *x);
-    }
-
-    #[test]
-    fn ref_safe_even_if_forgotten() {
-        let mut x: $stype<String, str> = Supercow::owned("foo".to_owned());
-        {
-            let mut m = x.to_mut();
-            // Add a bunch of characters to invalidate the allocation
-            for _ in 0..65536 {
-                m.push('x');
+                *b.to_mut() = 56;
+                assert_eq!(42, *a);
+                assert_eq!(x, *a);
+                assert_eq!(&x as *const u32 as usize, (&*a) as *const u32 as usize);
+                assert_eq!(56, *b);
             }
 
-            // Prevent the dtor from running but allow us to release the borrow
-            ::std::mem::forget(m);
-        }
+            #[test]
+            fn supports_dst() {
+                let a: $stype<String, str> = Supercow::borrowed("hello");
+                let b: $stype<String, str> = Supercow::owned("hello".to_owned());
+                assert_eq!(a, b);
 
-        // While the value has been corrupted, we have been left with a *safe*
-        // deref result nonetheless.
-        assert_eq!("", &*x);
-        // The actual String has not been lost so no memory has been leaked
-        assert_eq!(65539, x.to_mut().len());
-    }
+                let mut c = a.clone();
+                c.to_mut().push_str(" world");
+                assert_eq!(a, b);
+                assert_eq!(c, "hello world");
+            }
 
-    #[test]
-    // `SipHasher` is deprecated, but its replacement `DefaultHasher` doesn't
-    // exist in Rust 1.12.1.
-    #[allow(deprecated)]
-    fn general_trait_delegs_work() {
-        use std::borrow::Borrow;
-        use std::convert::AsRef;
-        use std::cmp::*;
-        use std::hash::*;
+            #[test]
+            fn default_accepts_arc() {
+                let x: $stype<u32> = Supercow::shared(Arc::new(42u32));
+                assert_eq!(42, *x);
+            }
 
-        macro_rules! test_fmt {
-            ($fmt:expr, $x:expr) => {
-                assert_eq!(format!($fmt, 42u32), format!($fmt, $x));
+            #[test]
+            fn ref_safe_even_if_forgotten() {
+                let mut x: $stype<String, str> = Supercow::owned("foo".to_owned());
+                {
+                    let mut m = x.to_mut();
+                    // Add a bunch of characters to invalidate the allocation
+                    for _ in 0..65536 {
+                        m.push('x');
+                    }
+
+                    // Prevent the dtor from running but allow us to release the borrow
+                    ::std::mem::forget(m);
+                }
+
+                // While the value has been corrupted, we have been left with a *safe*
+                // deref result nonetheless.
+                assert_eq!("", &*x);
+                // The actual String has not been lost so no memory has been leaked
+                assert_eq!(65539, x.to_mut().len());
+            }
+
+            #[test]
+            // `SipHasher` is deprecated, but its replacement `DefaultHasher` doesn't
+            // exist in Rust 1.12.1.
+            #[allow(deprecated)]
+            fn general_trait_delegs_work() {
+                use std::borrow::Borrow;
+                use std::cmp::*;
+                use std::convert::AsRef;
+                use std::hash::*;
+
+                macro_rules! test_fmt {
+                    ($fmt:expr, $x:expr) => {
+                        assert_eq!(format!($fmt, 42u32), format!($fmt, $x));
+                    };
+                }
+
+                let x: $stype<u32> = Supercow::owned(42u32);
+                test_fmt!("{}", x);
+                test_fmt!("{:?}", x);
+                test_fmt!("{:o}", x);
+                test_fmt!("{:x}", x);
+                test_fmt!("{:X}", x);
+                test_fmt!("{:b}", x);
+
+                assert!(x == 42);
+                assert!(x != 43);
+                assert!(x < 43);
+                assert!(x <= 43);
+                assert!(x > 41);
+                assert!(x >= 41);
+                assert_eq!(42.partial_cmp(&43), x.partial_cmp(&43));
+                assert_eq!(42.cmp(&43), x.cmp(&Supercow::owned(43)));
+
+                let mut expected_hash = SipHasher::new();
+                42u32.hash(&mut expected_hash);
+                let mut actual_hash = SipHasher::new();
+                x.hash(&mut actual_hash);
+                assert_eq!(expected_hash.finish(), actual_hash.finish());
+
+                assert_eq!(42u32, *x.borrow());
+                assert_eq!(42u32, *x.as_ref());
+            }
+
+            #[test]
+            fn owned_mode_survives_moving() {
+                // Using a `HashMap` here because it means the optimiser can't reason
+                // about which one will eventually be chosen, and so one of the values
+                // is guaranteed to eventually be moved off the heap onto the stack.
+                #[inline(never)]
+                fn pick_one() -> $stype<'static, String> {
+                    use std::collections::HashMap;
+
+                    let mut hm = HashMap::new();
+                    hm.insert("hello", Supercow::owned("hello".to_owned()));
+                    hm.insert("world", Supercow::owned("world".to_owned()));
+                    hm.into_iter().map(|(_, v)| v).next().unwrap()
+                }
+
+                let s = pick_one();
+                assert!("hello".to_owned() == *s || "world".to_owned() == *s);
+            }
+
+            #[test]
+            fn dst_string_str() {
+                let mut s: $stype<'static, String, str> = String::new().into();
+                let mut expected = String::new();
+                for i in 0..1024 {
+                    assert_eq!(expected.as_str(), &*s);
+                    expected.push_str(&format!("{}", i));
+                    s.to_mut().push_str(&format!("{}", i));
+                    assert_eq!(expected.as_str(), &*s);
+                }
+            }
+
+            #[test]
+            fn dst_vec_u8s() {
+                let mut s: $stype<'static, Vec<u8>, [u8]> = Vec::new().into();
+                let mut expected = Vec::<u8>::new();
+                for i in 0..1024 {
+                    assert_eq!(&expected[..], &*s);
+                    expected.push((i & 0xFF) as u8);
+                    s.to_mut().push((i & 0xFF) as u8);
+                    assert_eq!(&expected[..], &*s);
+                }
+            }
+
+            #[test]
+            fn dst_osstring_osstr() {
+                use std::ffi::{OsStr, OsString};
+
+                let mut s: $stype<'static, OsString, OsStr> = OsString::new().into();
+                let mut expected = OsString::new();
+                for i in 0..1024 {
+                    assert_eq!(expected.as_os_str(), &*s);
+                    expected.push(&format!("{}", i));
+                    s.to_mut().push(&format!("{}", i));
+                    assert_eq!(expected.as_os_str(), &*s);
+                }
+            }
+
+            #[test]
+            fn dst_cstring_cstr() {
+                use std::ffi::{CStr, CString};
+                use std::mem;
+                use std::ops::Deref;
+
+                let mut s: $stype<'static, CString, CStr> = CString::new("").unwrap().into();
+                let mut expected = CString::new("").unwrap();
+                for i in 0..1024 {
+                    assert_eq!(expected.deref(), &*s);
+                    {
+                        let mut ve = expected.into_bytes_with_nul();
+                        ve.pop();
+                        ve.push(((i & 0xFF) | 1) as u8);
+                        ve.push(0);
+                        expected = unsafe { CString::from_vec_unchecked(ve) };
+                    }
+                    {
+                        let mut m = s.to_mut();
+                        let mut vs =
+                            mem::replace(&mut *m, CString::new("").unwrap()).into_bytes_with_nul();
+                        vs.pop();
+                        vs.push(((i & 0xFF) | 1) as u8);
+                        vs.push(0);
+                        *m = unsafe { CString::from_vec_unchecked(vs) };
+                    }
+                    assert_eq!(expected.deref(), &*s);
+                }
+            }
+
+            #[test]
+            fn dst_pathbuf_path() {
+                use std::path::{Path, PathBuf};
+
+                let mut s: $stype<'static, PathBuf, Path> = PathBuf::new().into();
+                let mut expected = PathBuf::new();
+                for i in 0..1024 {
+                    assert_eq!(expected.as_path(), &*s);
+                    expected.push(format!("{}", i));
+                    s.to_mut().push(format!("{}", i));
+                    assert_eq!(expected.as_path(), &*s);
+                }
+            }
+
+            #[test]
+            fn unborrow_owned() {
+                let orig: Supercow<String, str> = Supercow::owned("hello world".to_owned());
+                let unborrowed = Supercow::unborrow(orig);
+                assert_eq!(unborrowed, "hello world");
+            }
+
+            #[test]
+            fn unborrow_borrowed() {
+                let orig: Supercow<String, str> = Supercow::borrowed("hello world");
+                let unborrowed = Supercow::unborrow(orig);
+                assert_eq!(unborrowed, "hello world");
+            }
+
+            #[test]
+            fn unborrow_shared() {
+                let orig: Supercow<String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let unborrowed = Supercow::unborrow(orig);
+                assert_eq!(unborrowed, "hello world".to_owned());
+            }
+
+            #[test]
+            fn take_ownership_owned() {
+                let orig: Supercow<String, str> = Supercow::owned("hello world".to_owned());
+                let owned: Supercow<String, str> = Supercow::take_ownership(orig);
+                assert_eq!(owned, "hello world");
+            }
+
+            #[test]
+            fn take_ownership_borrowed() {
+                let orig: Supercow<String, str> = Supercow::borrowed("hello world");
+                let owned: Supercow<String, str> = Supercow::take_ownership(orig);
+                assert_eq!(owned, "hello world");
+            }
+
+            #[test]
+            fn take_ownership_shared() {
+                let orig: Supercow<String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let owned: Supercow<String> = Supercow::take_ownership(orig);
+                assert_eq!(owned, "hello world".to_owned());
+            }
+
+            struct MockNativeResource(*mut u32);
+            impl Drop for MockNativeResource {
+                fn drop(&mut self) {
+                    unsafe { *self.0 = 0 };
+                }
+            }
+            // Not truly safe, but we're not crossing threads here and we need
+            // something for the Sync tests either way.
+            unsafe impl Send for MockNativeResource {}
+            unsafe impl Sync for MockNativeResource {}
+
+            struct MockDependentResource<'a> {
+                ptr: *mut u32,
+                _handle: $ptype<'a, MockNativeResource>,
+            }
+
+            fn check_dependent_ok(mdr: MockDependentResource) {
+                assert_eq!(42, unsafe { *mdr.ptr });
+            }
+
+            #[test]
+            fn borrowed_phantomcow() {
+                let mut forty_two = 42u32;
+
+                let native = MockNativeResource(&mut forty_two);
+                let sc: $stype<MockNativeResource> = Supercow::borrowed(&native);
+                check_dependent_ok(MockDependentResource {
+                    ptr: &mut forty_two,
+                    _handle: Supercow::phantom(sc),
+                });
+            }
+
+            #[test]
+            fn owned_phantomcow() {
+                let mut forty_two = 42u32;
+
+                let native = MockNativeResource(&mut forty_two);
+                let sc: $stype<MockNativeResource> = Supercow::owned(native);
+                check_dependent_ok(MockDependentResource {
+                    ptr: &mut forty_two,
+                    _handle: Supercow::phantom(sc),
+                });
+            }
+
+            #[test]
+            fn shared_phantomcow() {
+                let mut forty_two = 42u32;
+
+                let native = MockNativeResource(&mut forty_two);
+                let sc: $stype<MockNativeResource> = Supercow::shared(Arc::new(native));
+                check_dependent_ok(MockDependentResource {
+                    ptr: &mut forty_two,
+                    _handle: Supercow::phantom(sc),
+                });
+            }
+
+            #[test]
+            fn clone_owned_phantomcow() {
+                let sc: $stype<String> = Supercow::owned("hello world".to_owned());
+                let p1 = Supercow::phantom(sc);
+                assert!(Supercow::clone_non_owned(&p1).is_none());
+                let _p2 = p1.clone();
+            }
+
+            #[test]
+            fn clone_borrowed_phantomcow() {
+                let sc: $stype<String, str> = Supercow::borrowed("hello world");
+                let p1 = Supercow::phantom(sc);
+                assert!(Supercow::clone_non_owned(&p1).is_some());
+                let _p2 = p1.clone();
+            }
+
+            #[test]
+            fn clone_shared_phantomcow() {
+                let sc: $stype<String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let p1 = Supercow::phantom(sc);
+                assert!(Supercow::clone_non_owned(&p1).is_some());
+                let _p2 = p1.clone();
+            }
+
+            struct NotCloneable(u32);
+            impl Drop for NotCloneable {
+                fn drop(&mut self) {
+                    self.0 = 0;
+                }
+            }
+
+            #[test]
+            fn share_owned_supercow() {
+                let mut a: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
+                let b = Supercow::share(&mut a);
+
+                assert_eq!(42, (*a).0);
+                assert_eq!(42, (*b).0);
+            }
+
+            #[test]
+            fn share_borrowed_supercow() {
+                let nc = NotCloneable(42);
+                let mut a: $stype<NotCloneable> = Supercow::borrowed(&nc);
+                let b = Supercow::share(&mut a);
+
+                assert_eq!(42, (*a).0);
+                assert_eq!(42, (*b).0);
+            }
+
+            #[test]
+            fn share_shared_supercow() {
+                let mut a: $stype<NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
+                let b = Supercow::share(&mut a);
+
+                assert_eq!(42, (*a).0);
+                assert_eq!(42, (*b).0);
+            }
+
+            #[test]
+            fn share_owned_dst_supercow() {
+                let mut a: $stype<String, str> = Supercow::owned("hello world".into());
+                let b = Supercow::share(&mut a);
+
+                assert_eq!("hello world", &*a);
+                assert_eq!("hello world", &*b);
+            }
+
+            #[test]
+            fn share_owned_phantomcow() {
+                let sc: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
+                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let _b = Supercow::share(&mut a);
+            }
+
+            #[test]
+            fn share_borrowed_phantomcow() {
+                let nc = NotCloneable(42);
+                let sc: $stype<NotCloneable> = Supercow::borrowed(&nc);
+                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let _b = Supercow::share(&mut a);
+            }
+
+            #[test]
+            fn share_shared_phantomcow() {
+                let sc: $stype<NotCloneable> = Supercow::shared(Arc::new(NotCloneable(42)));
+                let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
+                let _b = Supercow::share(&mut a);
+            }
+
+            #[test]
+            fn share_owned_dst_phantomcow() {
+                let sc: $stype<String, str> = Supercow::owned("hello world".into());
+                let mut a: $ptype<String, str> = Supercow::phantom(sc);
+                let _b = Supercow::share(&mut a);
             }
         }
-
-        let x: $stype<u32> = Supercow::owned(42u32);
-        test_fmt!("{}", x);
-        test_fmt!("{:?}", x);
-        test_fmt!("{:o}", x);
-        test_fmt!("{:x}", x);
-        test_fmt!("{:X}", x);
-        test_fmt!("{:b}", x);
-
-        assert!(x == 42);
-        assert!(x != 43);
-        assert!(x < 43);
-        assert!(x <= 43);
-        assert!(x > 41);
-        assert!(x >= 41);
-        assert_eq!(42.partial_cmp(&43), x.partial_cmp(&43));
-        assert_eq!(42.cmp(&43), x.cmp(&Supercow::owned(43)));
-
-        let mut expected_hash = SipHasher::new();
-        42u32.hash(&mut expected_hash);
-        let mut actual_hash = SipHasher::new();
-        x.hash(&mut actual_hash);
-        assert_eq!(expected_hash.finish(), actual_hash.finish());
-
-        assert_eq!(42u32, *x.borrow());
-        assert_eq!(42u32, *x.as_ref());
-    }
-
-    #[test]
-    fn owned_mode_survives_moving() {
-        // Using a `HashMap` here because it means the optimiser can't reason
-        // about which one will eventually be chosen, and so one of the values
-        // is guaranteed to eventually be moved off the heap onto the stack.
-        #[inline(never)]
-        fn pick_one() -> $stype<'static, String> {
-            use std::collections::HashMap;
-
-            let mut hm = HashMap::new();
-            hm.insert("hello", Supercow::owned("hello".to_owned()));
-            hm.insert("world", Supercow::owned("world".to_owned()));
-            hm.into_iter().map(|(_, v)| v).next().unwrap()
-        }
-
-        let s = pick_one();
-        assert!("hello".to_owned() == *s ||
-                "world".to_owned() == *s);
-    }
-
-    #[test]
-    fn dst_string_str() {
-        let mut s: $stype<'static, String, str> = String::new().into();
-        let mut expected = String::new();
-        for i in 0..1024 {
-            assert_eq!(expected.as_str(), &*s);
-            expected.push_str(&format!("{}", i));
-            s.to_mut().push_str(&format!("{}", i));
-            assert_eq!(expected.as_str(), &*s);
-        }
-    }
-
-    #[test]
-    fn dst_vec_u8s() {
-        let mut s: $stype<'static, Vec<u8>, [u8]> = Vec::new().into();
-        let mut expected = Vec::<u8>::new();
-        for i in 0..1024 {
-            assert_eq!(&expected[..], &*s);
-            expected.push((i & 0xFF) as u8);
-            s.to_mut().push((i & 0xFF) as u8);
-            assert_eq!(&expected[..], &*s);
-        }
-    }
-
-    #[test]
-    fn dst_osstring_osstr() {
-        use std::ffi::{OsStr, OsString};
-
-        let mut s: $stype<'static, OsString, OsStr> = OsString::new().into();
-        let mut expected = OsString::new();
-        for i in 0..1024 {
-            assert_eq!(expected.as_os_str(), &*s);
-            expected.push(&format!("{}", i));
-            s.to_mut().push(&format!("{}", i));
-            assert_eq!(expected.as_os_str(), &*s);
-        }
-    }
-
-    #[test]
-    fn dst_cstring_cstr() {
-        use std::ffi::{CStr, CString};
-        use std::mem;
-        use std::ops::Deref;
-
-        let mut s: $stype<'static, CString, CStr> =
-            CString::new("").unwrap().into();
-        let mut expected = CString::new("").unwrap();
-        for i in 0..1024 {
-            assert_eq!(expected.deref(), &*s);
-            {
-                let mut ve = expected.into_bytes_with_nul();
-                ve.pop();
-                ve.push(((i & 0xFF) | 1) as u8);
-                ve.push(0);
-                expected = unsafe {
-                    CString::from_vec_unchecked(ve)
-                };
-            }
-            {
-                let mut m = s.to_mut();
-                let mut vs = mem::replace(&mut *m, CString::new("").unwrap())
-                    .into_bytes_with_nul();
-                vs.pop();
-                vs.push(((i & 0xFF) | 1) as u8);
-                vs.push(0);
-                *m = unsafe {
-                    CString::from_vec_unchecked(vs)
-                };
-            }
-            assert_eq!(expected.deref(), &*s);
-        }
-    }
-
-    #[test]
-    fn dst_pathbuf_path() {
-        use std::path::{Path, PathBuf};
-
-        let mut s: $stype<'static, PathBuf, Path> = PathBuf::new().into();
-        let mut expected = PathBuf::new();
-        for i in 0..1024 {
-            assert_eq!(expected.as_path(), &*s);
-            expected.push(format!("{}", i));
-            s.to_mut().push(format!("{}", i));
-            assert_eq!(expected.as_path(), &*s);
-        }
-    }
-
-    #[test]
-    fn unborrow_owned() {
-        let orig: Supercow<String, str> =
-            Supercow::owned("hello world".to_owned());
-        let unborrowed = Supercow::unborrow(orig);
-        assert_eq!(unborrowed, "hello world");
-    }
-
-    #[test]
-    fn unborrow_borrowed() {
-        let orig: Supercow<String, str> =
-            Supercow::borrowed("hello world");
-        let unborrowed = Supercow::unborrow(orig);
-        assert_eq!(unborrowed, "hello world");
-    }
-
-    #[test]
-    fn unborrow_shared() {
-        let orig: Supercow<String> =
-            Supercow::shared(Arc::new("hello world".to_owned()));
-        let unborrowed = Supercow::unborrow(orig);
-        assert_eq!(unborrowed, "hello world".to_owned());
-    }
-
-    #[test]
-    fn take_ownership_owned() {
-        let orig: Supercow<String, str> =
-            Supercow::owned("hello world".to_owned());
-        let owned: Supercow<String, str> = Supercow::take_ownership(orig);
-        assert_eq!(owned, "hello world");
-    }
-
-    #[test]
-    fn take_ownership_borrowed() {
-        let orig: Supercow<String, str> =
-            Supercow::borrowed("hello world");
-        let owned: Supercow<String, str> = Supercow::take_ownership(orig);
-        assert_eq!(owned, "hello world");
-    }
-
-    #[test]
-    fn take_ownership_shared() {
-        let orig: Supercow<String> =
-            Supercow::shared(Arc::new("hello world".to_owned()));
-        let owned: Supercow<String> = Supercow::take_ownership(orig);
-        assert_eq!(owned, "hello world".to_owned());
-    }
-
-    struct MockNativeResource(*mut u32);
-    impl Drop for MockNativeResource {
-        fn drop(&mut self) {
-            unsafe { *self.0 = 0 };
-        }
-    }
-    // Not truly safe, but we're not crossing threads here and we need
-    // something for the Sync tests either way.
-    unsafe impl Send for MockNativeResource { }
-    unsafe impl Sync for MockNativeResource { }
-
-    struct MockDependentResource<'a> {
-        ptr: *mut u32,
-        _handle: $ptype<'a, MockNativeResource>,
-    }
-
-    fn check_dependent_ok(mdr: MockDependentResource) {
-        assert_eq!(42, unsafe { *mdr.ptr });
-    }
-
-    #[test]
-    fn borrowed_phantomcow() {
-        let mut forty_two = 42u32;
-
-        let native = MockNativeResource(&mut forty_two);
-        let sc: $stype<MockNativeResource> = Supercow::borrowed(&native);
-        check_dependent_ok(MockDependentResource {
-            ptr: &mut forty_two,
-            _handle: Supercow::phantom(sc),
-        });
-    }
-
-    #[test]
-    fn owned_phantomcow() {
-        let mut forty_two = 42u32;
-
-        let native = MockNativeResource(&mut forty_two);
-        let sc: $stype<MockNativeResource> = Supercow::owned(native);
-        check_dependent_ok(MockDependentResource {
-            ptr: &mut forty_two,
-            _handle: Supercow::phantom(sc),
-        });
-    }
-
-    #[test]
-    fn shared_phantomcow() {
-        let mut forty_two = 42u32;
-
-        let native = MockNativeResource(&mut forty_two);
-        let sc: $stype<MockNativeResource> =
-            Supercow::shared(Arc::new(native));
-        check_dependent_ok(MockDependentResource {
-            ptr: &mut forty_two,
-            _handle: Supercow::phantom(sc),
-        });
-    }
-
-    #[test]
-    fn clone_owned_phantomcow() {
-        let sc: $stype<String> = Supercow::owned("hello world".to_owned());
-        let p1 = Supercow::phantom(sc);
-        assert!(Supercow::clone_non_owned(&p1).is_none());
-        let _p2 = p1.clone();
-    }
-
-    #[test]
-    fn clone_borrowed_phantomcow() {
-        let sc: $stype<String, str> = Supercow::borrowed("hello world");
-        let p1 = Supercow::phantom(sc);
-        assert!(Supercow::clone_non_owned(&p1).is_some());
-        let _p2 = p1.clone();
-    }
-
-    #[test]
-    fn clone_shared_phantomcow() {
-        let sc: $stype<String> = Supercow::shared(
-            Arc::new("hello world".to_owned()));
-        let p1 = Supercow::phantom(sc);
-        assert!(Supercow::clone_non_owned(&p1).is_some());
-        let _p2 = p1.clone();
-    }
-
-    struct NotCloneable(u32);
-    impl Drop for NotCloneable {
-        fn drop(&mut self) {
-            self.0 = 0;
-        }
-    }
-
-    #[test]
-    fn share_owned_supercow() {
-        let mut a: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
-        let b = Supercow::share(&mut a);
-
-        assert_eq!(42, (*a).0);
-        assert_eq!(42, (*b).0);
-    }
-
-    #[test]
-    fn share_borrowed_supercow() {
-        let nc = NotCloneable(42);
-        let mut a: $stype<NotCloneable> = Supercow::borrowed(&nc);
-        let b = Supercow::share(&mut a);
-
-        assert_eq!(42, (*a).0);
-        assert_eq!(42, (*b).0);
-    }
-
-    #[test]
-    fn share_shared_supercow() {
-        let mut a: $stype<NotCloneable> = Supercow::shared(
-            Arc::new(NotCloneable(42)));
-        let b = Supercow::share(&mut a);
-
-        assert_eq!(42, (*a).0);
-        assert_eq!(42, (*b).0);
-    }
-
-    #[test]
-    fn share_owned_dst_supercow() {
-        let mut a: $stype<String, str> = Supercow::owned("hello world".into());
-        let b = Supercow::share(&mut a);
-
-        assert_eq!("hello world", &*a);
-        assert_eq!("hello world", &*b);
-    }
-
-    #[test]
-    fn share_owned_phantomcow() {
-        let sc: $stype<NotCloneable> = Supercow::owned(NotCloneable(42));
-        let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
-        let _b = Supercow::share(&mut a);
-    }
-
-    #[test]
-    fn share_borrowed_phantomcow() {
-        let nc = NotCloneable(42);
-        let sc: $stype<NotCloneable> = Supercow::borrowed(&nc);
-        let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
-        let _b = Supercow::share(&mut a);
-    }
-
-    #[test]
-    fn share_shared_phantomcow() {
-        let sc: $stype<NotCloneable> =
-            Supercow::shared(Arc::new(NotCloneable(42)));
-        let mut a: $ptype<NotCloneable> = Supercow::phantom(sc);
-        let _b = Supercow::share(&mut a);
-    }
-
-    #[test]
-    fn share_owned_dst_phantomcow() {
-        let sc: $stype<String, str> = Supercow::owned("hello world".into());
-        let mut a: $ptype<String, str> = Supercow::phantom(sc);
-        let _b = Supercow::share(&mut a);
-    }
-} } }
+    };
+}
 
 tests!(inline_sync_tests, InlineSupercow, InlinePhantomcow);
-tests!(inline_nonsync_tests, InlineNonSyncSupercow, InlineNonSyncPhantomcow);
+tests!(
+    inline_nonsync_tests,
+    InlineNonSyncSupercow,
+    InlineNonSyncPhantomcow
+);
 tests!(boxed_sync_tests, Supercow, Phantomcow);
 tests!(boxed_nonsync_tests, NonSyncSupercow, NonSyncPhantomcow);
