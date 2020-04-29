@@ -26,7 +26,7 @@ use std::sync::Arc;
 /// implement it. It is also not a subtrait of `Deref` due to some additional
 /// special logic around boxes.
 ///
-/// ## Unsafety
+/// # Safety
 ///
 /// Behaviour is undefined if the implementation does not always return the
 /// same reference from `const_deref()` for any particular implementing value
@@ -74,7 +74,7 @@ pub trait TwoStepShared<OWNED, BORROWED: ?Sized> {
     fn new_two_step() -> Self;
     /// Returns the internal `Option<T>` backing this value.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// This call may assume that `self` was produced by a call to
     /// `new_two_step` on the same implementation. (This is to allow
@@ -121,7 +121,7 @@ pub const MAX_INTERNAL_BORROW_DISPLACEMENT: usize = 2048;
 
 /// Extension of `Borrow` used to allow `Supercow::to_mut()` to work safely.
 ///
-/// ## Unsafety
+/// # Safety
 ///
 /// Behaviour is undefined if the `borrow()` implementation may return a
 /// reference into `self` which is more than `MAX_INTERNAL_BORROW_DISPLACEMENT`
@@ -135,11 +135,11 @@ pub unsafe trait SafeBorrow<T: ?Sized>: Borrow<T> {
     /// `self` can simply return `ptr` unmodified. Other types typically need
     /// to provide some static reference, such as the empty string for `&str`.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// Behaviour is undefined if this call returns `ptr`, but a mutation to
     /// `Self` could invalidate the reference.
-    fn borrow_replacement<'a>(ptr: &'a T) -> &'a T;
+    fn borrow_replacement(ptr: &T) -> &T;
 }
 unsafe impl<T: ?Sized> SafeBorrow<T> for T {
     fn borrow_replacement(ptr: &T) -> &T {
@@ -196,7 +196,7 @@ where
 /// There is no utility of applying this trait to anything other than a const
 /// pointer.
 ///
-/// ## Unsafety
+/// # Safety
 ///
 /// Behaviour is undefined if a marked type does not begin with a real pointer
 /// to a value (with the usual exception of ZSTs, where the pointer does not
@@ -217,7 +217,7 @@ unsafe impl PointerFirstRef for *const ::std::path::Path {}
 /// Like `std::convert::From`, but without the blanket implementations that
 /// cause problems for `supercow_features!`.
 ///
-/// ## Unsafety
+/// # Safety
 ///
 /// The conversion may not invalidate the address returned by
 /// `T::const_deref()` if `T` is `ConstDeref`.
@@ -241,7 +241,7 @@ unsafe impl<T> SharedFrom<Arc<T>> for Arc<T> {
 /// All notes for `*_b` functions are the same as the corresponding `*_a`
 /// functions.
 ///
-/// ## Unsafety
+/// # Safety
 ///
 /// `Supercow` relies strongly on the contracts of the functions in this trait
 /// being implemented correctly.
@@ -254,7 +254,7 @@ pub unsafe trait OwnedStorage<A, B>: Default {
     ///
     /// Returns a pointer with 2-byte alignment.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// Behaviour is undefined if this call returns a pointer with incorrect
     /// alignment.
@@ -270,28 +270,28 @@ pub unsafe trait OwnedStorage<A, B>: Default {
     fn allocate_b(&mut self, value: B) -> *mut ();
     /// Extracts the immutable reference from the saved pointer and storage.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// This call may assume that `ptr` is exactly a (2-byte-aligned) value it
     /// returned from `allocate_a`, and that `self` was initialised by a call
     /// to `allocate_a`.
-    unsafe fn get_ptr_a<'a>(&'a self, ptr: *mut ()) -> &'a A;
+    unsafe fn get_ptr_a(&self, ptr: *mut ()) -> &A;
     /// See `get_ptr_a`.
-    unsafe fn get_ptr_b<'a>(&'a self, ptr: *mut ()) -> &'a B;
+    unsafe fn get_ptr_b(&self, ptr: *mut ()) -> &B;
     /// Extracts the mutable reference from the saved pointer and storage.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// This call may assume that `ptr` is exactly a (2-byte-aligned) value it
     /// returned from `allocate_a` and that `self` was initialised by a call to
     /// `allocate_a`.
-    unsafe fn get_mut_a<'a>(&'a mut self, ptr: *mut ()) -> &'a mut A;
+    unsafe fn get_mut_a(&mut self, ptr: *mut ()) -> &mut A;
     /// See `get_mut_a`.
-    unsafe fn get_mut_b<'a>(&'a mut self, ptr: *mut ()) -> &'a mut B;
+    unsafe fn get_mut_b(&mut self, ptr: *mut ()) -> &mut B;
     /// Releases any allocations that would not be released by `Stored`
     /// being dropped.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// This call may assume that `ptr` is exactly a (2-byte-aligned) value it
     /// returned from `allocate_a`.
@@ -311,7 +311,7 @@ pub unsafe trait OwnedStorage<A, B>: Default {
     /// Returns whether this storage implementation ever causes the owned
     /// object to be stored internally to the `Supercow`.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// Behaviour is undefined if this returns `false` but the owned value is
     /// stored within the `Supercow`.
@@ -353,7 +353,7 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    unsafe fn get_ptr_a<'a>(&'a self, _: *mut ()) -> &'a A {
+    unsafe fn get_ptr_a(&self, _: *mut ()) -> &A {
         match self.0 {
             InlineStorageImpl::A(ref r) => r,
             _ => unreachable!(),
@@ -361,7 +361,7 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    unsafe fn get_ptr_b<'a>(&'a self, _: *mut ()) -> &'a B {
+    unsafe fn get_ptr_b(&self, _: *mut ()) -> &B {
         match self.0 {
             InlineStorageImpl::B(ref r) => r,
             _ => unreachable!(),
@@ -369,7 +369,7 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    unsafe fn get_mut_a<'a>(&'a mut self, _: *mut ()) -> &'a mut A {
+    unsafe fn get_mut_a(&mut self, _: *mut ()) -> &mut A {
         match self.0 {
             InlineStorageImpl::A(ref mut r) => r,
             _ => unreachable!(),
@@ -377,7 +377,7 @@ unsafe impl<A, B> OwnedStorage<A, B> for InlineStorage<A, B> {
     }
 
     #[inline]
-    unsafe fn get_mut_b<'a>(&'a mut self, _: *mut ()) -> &'a mut B {
+    unsafe fn get_mut_b(&mut self, _: *mut ()) -> &mut B {
         match self.0 {
             InlineStorageImpl::B(ref mut r) => r,
             _ => unreachable!(),
@@ -455,22 +455,22 @@ unsafe impl<A, B> OwnedStorage<A, B> for BoxedStorage {
     }
 
     #[inline]
-    unsafe fn get_ptr_a<'a>(&'a self, ptr: *mut ()) -> &'a A {
+    unsafe fn get_ptr_a(&self, ptr: *mut ()) -> &A {
         &(*(ptr as *const Aligned<A>)).1
     }
 
     #[inline]
-    unsafe fn get_ptr_b<'a>(&'a self, ptr: *mut ()) -> &'a B {
+    unsafe fn get_ptr_b(&self, ptr: *mut ()) -> &B {
         &(*(ptr as *const Aligned<B>)).1
     }
 
     #[inline]
-    unsafe fn get_mut_a<'a>(&'a mut self, ptr: *mut ()) -> &'a mut A {
+    unsafe fn get_mut_a(&mut self, ptr: *mut ()) -> &mut A {
         &mut (*(ptr as *mut Aligned<A>)).1
     }
 
     #[inline]
-    unsafe fn get_mut_b<'a>(&'a mut self, ptr: *mut ()) -> &'a mut B {
+    unsafe fn get_mut_b(&mut self, ptr: *mut ()) -> &mut B {
         &mut (*(ptr as *mut Aligned<B>)).1
     }
 
@@ -524,7 +524,7 @@ pub unsafe trait PtrWrite<T: ?Sized>: Copy {
 
     /// Writes the given pointer into `self`.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// The implementation must not inspect the given pointer. This call must
     /// not panic.
@@ -533,9 +533,7 @@ pub unsafe trait PtrWrite<T: ?Sized>: Copy {
 
 unsafe impl<T: ?Sized> PtrWrite<T> for () {
     #[inline(always)]
-    fn new() -> Self {
-        ()
-    }
+    fn new() -> Self {}
 
     #[inline(always)]
     fn store_ptr(&mut self, _: *const T) {}
@@ -544,7 +542,7 @@ unsafe impl<T: ?Sized> PtrWrite<T> for () {
 unsafe impl<T: ?Sized> PtrWrite<T> for *const T {
     #[inline(always)]
     fn new() -> Self {
-        unsafe { mem::uninitialized() }
+        unsafe { std::mem::MaybeUninit::uninit().assume_init() }
     }
 
     #[inline(always)]
@@ -557,7 +555,7 @@ unsafe impl<T: ?Sized> PtrWrite<T> for *const T {
 pub unsafe trait PtrRead<T: ?Sized>: PtrWrite<T> {
     /// Returns the pointer most recently stored via `store_ptr()`.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// Behaviour is undefined if the returned value is not *exactly* equal to
     /// the value passed in to the last call to `store_ptr()`. This call must
@@ -585,7 +583,7 @@ pub trait RefParent {
 
     /// Notifies `self` that a `Ref` has been dropped.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// Behaviour is undefined if `self` is not in owned mode.
     ///

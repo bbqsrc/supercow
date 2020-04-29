@@ -492,7 +492,6 @@
 //!   // let _bor_ba: &'b Supercow<'a, u32> = bor;
 //! }
 //!
-//! # fn main() { }
 //! ```
 //!
 //! ## `Sync` and `Send`
@@ -1492,7 +1491,7 @@ defimpl! {[] () where { } {
     /// If the returned `Ref` is released without its destructor being run, the
     /// behaviour of the `Supercow` is unspecified (but does not result in
     /// memory unsafety).
-    pub fn to_mut<'b>(&'b mut self) -> Ref<'b, Self>
+    pub fn to_mut(&mut self) -> Ref<'_, Self>
     where OWNED : SafeBorrow<BORROWED>,
           BORROWED : ToOwned<Owned = OWNED>,
           PTR : PtrRead<BORROWED>
@@ -1620,7 +1619,7 @@ defimpl! {[] () where { } {
         // Call default() before the below in case it panics
         let new_storage = STORAGE::default();
 
-        let ret = Supercow {
+        Supercow {
             ptr: (),
             // mem::replace is critical for safety, otherwise we would
             // double-free when `this` is dropped.
@@ -1629,8 +1628,7 @@ defimpl! {[] () where { } {
             _owned: PhantomData,
             _borrowed: PhantomData,
             _shared: PhantomData,
-        };
-        ret
+        }
     }
 
     /// Sets `self.ptr` up for owned mode.
@@ -1638,7 +1636,7 @@ defimpl! {[] () where { } {
     /// `self.ptr` will either be written to a new valid value, or if this call
     /// panics, will be left with whatever value it had before.
     ///
-    /// ## Unsafety
+    /// # Safety
     ///
     /// `self` must be in owned mode, and storage slot a allocated.
     unsafe fn borrow_owned(&mut self)
@@ -1953,10 +1951,6 @@ defimpl! {[T] (cmp::PartialEq<T> for) where {
     fn eq(&self, other: &T) -> bool {
         **self == *other.borrow()
     }
-
-    fn ne(&self, other: &T) -> bool {
-        **self != *other.borrow()
-    }
 } }
 
 defimpl! {[] (cmp::Eq for) where {
@@ -2031,7 +2025,7 @@ unsafe trait PfrExt: Copy {
         let saddr: &usize = unsafe {
             // Safety, here and below: We know `Self` is a `PointerFirstRef` or
             // similar.
-            mem::transmute(&self)
+            &*(&self as *const Self as *const usize)
         };
         *saddr
     }
@@ -2041,9 +2035,9 @@ unsafe trait PfrExt: Copy {
     #[inline]
     fn with_address(mut self, address: usize) -> Self {
         let saddr: &mut usize = unsafe {
-            // Safety: These transmutes are visible to the borrow checker, so
+            // Safety: These casts are visible to the borrow checker, so
             // we aren't violating aliasing rules.
-            mem::transmute(&mut self)
+            &mut *(&mut self as *mut Self as *mut usize)
         };
         *saddr = address;
 
@@ -2051,9 +2045,9 @@ unsafe trait PfrExt: Copy {
             // Safety: Possibly a grey area, since we may be creating a
             // non-native pointer out of thin air.
             //
-            // Transmuting back to `&mut Self` makes the write dependency more
+            // Casing back to `&mut Self` makes the write dependency more
             // explicit but is likely not strictly necessary.
-            mem::transmute(saddr)
+            &mut *(saddr as *mut usize as *mut Self)
         };
         *saddr
     }
@@ -2256,7 +2250,7 @@ macro_rules! tests {
                 }
 
                 let s = pick_one();
-                assert!("hello".to_owned() == *s || "world".to_owned() == *s);
+                assert!("hello" == *s || "world" == *s);
             }
 
             #[test]
@@ -2357,7 +2351,8 @@ macro_rules! tests {
 
             #[test]
             fn unborrow_shared() {
-                let orig: Supercow<'_, String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let orig: Supercow<'_, String> =
+                    Supercow::shared(Arc::new("hello world".to_owned()));
                 let unborrowed = Supercow::unborrow(orig);
                 assert_eq!(unborrowed, "hello world".to_owned());
             }
@@ -2378,7 +2373,8 @@ macro_rules! tests {
 
             #[test]
             fn take_ownership_shared() {
-                let orig: Supercow<'_, String> = Supercow::shared(Arc::new("hello world".to_owned()));
+                let orig: Supercow<'_, String> =
+                    Supercow::shared(Arc::new("hello world".to_owned()));
                 let owned: Supercow<'_, String> = Supercow::take_ownership(orig);
                 assert_eq!(owned, "hello world".to_owned());
             }
